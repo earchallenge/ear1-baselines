@@ -92,6 +92,7 @@ def main() -> int:
     out.write_text("\n".join(json.dumps(r, ensure_ascii=False) for r in records) + "\n", encoding="utf-8")
     summary = {
         "data_root": str(data_root), "split_path": str(split_path), "split": split,
+        "eval_devices": DATA_CONFIG["eval_devices"],
         "discovered_val_devices": len(val_inventory),
         "ready_val_devices": sum(r["status"] == "READY" for r in val_inventory),
         "records": len(records),

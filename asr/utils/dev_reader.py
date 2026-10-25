@@ -42,7 +42,7 @@ def discover_devices(data_root, session, cfg):
                        "review": decision})
     for grid in files:
         if grid.suffix.casefold() == ".textgrid" and grid.resolve() not in used:
-            result.append({"session": session, "device": grid.stem, "audio_path": None,
+            result.append({"session": session, "device": grid.relative_to(directory).with_suffix("").as_posix(), "audio_path": None,
                            "textgrid_path": str(grid.resolve()), "status": "exclude",
                            "reason": "missing_audio", "review": {}})
     return result
@@ -70,6 +70,8 @@ def build_inventory(data_root, cfg, split):
     for session in split["eval_sessions"]:
         role = "val"
         devices = discover_devices(data_root, session, cfg)
+        selected = {name.casefold() for name in cfg["eval_devices"]}
+        devices = [base for base in devices if base["device"].casefold() in selected]
         activity, starts = session_activity(devices)
         for base in devices:
             row = {"session": session, "session_role": role, "device": base["device"],

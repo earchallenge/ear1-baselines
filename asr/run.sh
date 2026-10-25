@@ -62,6 +62,8 @@ metadata = output / "run_metadata.json"
 if not manifest.is_file(): raise SystemExit(f"ERROR: manifest not found: {manifest}")
 if not predictions.is_file() or not metadata.is_file(): raise SystemExit("ERROR: existing predictions or metadata are missing")
 records = [json.loads(x) for x in manifest.read_text(encoding="utf-8").splitlines() if x.strip()]
+if not records or any(str(x.get("device", "")).upper() not in {"D1", "R1"} for x in records):
+    raise SystemExit("ERROR: CER requires a nonempty D1/R1-only manifest. Rerun without --eval-only to prepare it.")
 rows = [json.loads(x) for x in predictions.read_text(encoding="utf-8").splitlines() if x.strip()]
 meta = json.loads(metadata.read_text(encoding="utf-8"))
 actual_model = meta.get("model", "")
