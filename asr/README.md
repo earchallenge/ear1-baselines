@@ -11,6 +11,19 @@ Use Linux, Bash and Python 3.10 with CUDA PyTorch. From `asr/`:
 ```bash
 bash setup_env.sh
 conda activate asr
+```
+
+Alternatively, create and activate the environment manually:
+
+```bash
+conda create -n asr python=3.10 -y
+conda activate asr
+pip install -r requirements.txt
+```
+
+Then download Whisper large-v3:
+
+```bash
 bash download_models.sh --model whisper-large-v3
 ```
 
@@ -111,29 +124,25 @@ results/whisper-large-v3/
   result_summary.md
 ```
 
-Both metrics apply NFKC, lowercase, and removal of whitespace and Unicode
-punctuation. Chinese transcription uses 16 kHz audio, one beam and maximum token
-length 448. **OVERALL is micro-averaged per device:** total character errors
-divided by total reference characters across sessions, multiplied by 100.
+Text normalization applies NFKC, lowercase, and removal of whitespace and Unicode
+punctuation. Whisper uses Chinese transcription, 16 kHz audio, one beam and
+maximum token length 448. **OVERALL is micro-averaged per device:** total character
+edit errors divided by total reference characters across sessions, multiplied by 100.
 
-CER accumulates utterance-level edit errors; invalid reference intervals and
-those longer than 30 seconds are excluded. cpCER concatenates text per speaker
-and minimizes total character edit errors over speaker assignments. Predicted
-intervals are restricted to the actual recording duration and split into windows
-of at most 30 seconds; overlapping speakers retain the original mixture.
+CER accumulates edit errors over reference utterances. cpCER concatenates text
+chronologically per speaker and finds the speaker assignment with the fewest
+total character edit errors. Predicted RTTM segments are clipped to the recording
+duration and split into windows of at most 30 seconds; speaker overlap is retained.
 
-Reference end times allow 10 ms rounding tolerance. For cpCER, crossing or
-out-of-range reference intervals are excluded in full and reported; longer-than-
-30-second reference intervals remain. cpCER has no temporal collar. These text
-and reference-filtering policies belong to this ASR baseline, not the DER
-scorer. CER and cpCER use different segmentation and are not directly comparable;
-neither replaces official ESR-ON cpWER scoring.
+Reference end times allow 10 ms rounding tolerance. Invalid or out-of-range
+reference intervals are excluded. CER also excludes intervals longer than
+30 seconds. cpCER retains long reference intervals and reports any whole
+reference intervals excluded for crossing the recording boundary.
 
 ## Contributor-reported preliminary development results
 
 CER values come from the contributor's existing `ASR_Baseline` output. cpCER
 values come from the completed DiariZen + Whisper run (8,531 ASR windows).
-These preliminary values have not been independently reproduced.
 
 | Session | D1 CER (%) | R1 CER (%) | D1 cpCER (%) | R1 cpCER (%) |
 |---|---:|---:|---:|---:|
