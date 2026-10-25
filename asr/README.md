@@ -28,6 +28,11 @@ CER uses matching D1/R1 audio and TextGrids. cpCER uses D1/R1 WAVs, personal
 `A/P*.TextGrid` references and predicted `D1/<session>.rttm` and
 `R1/<session>.rttm` files under the RTTM root.
 
+Run the following commands from `asr/` after activating the ASR environment.
+Replace `/path/to/...` with your own paths and `CUDA_VISIBLE_DEVICES=0` with the
+GPU to use. Quote paths containing spaces or `&`, for example
+`"/data/Train&Dev"`. If the dataset contains `split.lst`, omit `--split`.
+
 ```bash
 # Reference-segmented CER
 CUDA_VISIBLE_DEVICES=0 bash run.sh /path/to/dataset \
@@ -36,16 +41,54 @@ CUDA_VISIBLE_DEVICES=0 bash run.sh /path/to/dataset \
 # Predicted-RTTM cpCER
 CUDA_VISIBLE_DEVICES=0 bash run_cpcer.sh /path/to/dataset \
   --split /path/to/official/split.lst \
-  --rttm-root /path/to/predicted/infer/dev
+  --rttm-root /path/to/predicted/infer/dev \
+  --model-path /path/to/whisper-large-v3 \
+  --output-dir outputs/whisper-large-v3/dev_diarized \
+  --results-root results
 ```
 
-Change `CUDA_VISIBLE_DEVICES` to select a GPU. For cpCER, use `--model-path` to
-select existing local weights, `--dry-run` to check inputs, and `--help` for
-options. Its default RTTM root is `../diarization/results/infer/dev/`.
+`--rttm-root` must contain the predicted `D1/` and `R1/` subdirectories.
+`--model-path` points to a complete local Whisper large-v3 model;
+`--output-dir` stores recognition progress, and reports go under
+`--results-root/whisper-large-v3/`. The model/output arguments above are optional
+when using the default locations. The default RTTM root is
+`../diarization/results/infer/dev/`.
 
-To score existing predictions, add `--eval-only` for CER or `--stage score` for
-cpCER. Repeating the same cpCER command resumes completed windows. After changing
-inputs or configuration, use a new `--output-dir` and `--results-root`.
+Before a first cpCER run, append `--dry-run` to the command above. After
+`INPUT CHECK COMPLETE`, remove that flag to recognize and score. Both commands
+evaluate D1 and R1; cpCER also accepts `--tracks D1` or `--tracks R1`.
+
+To recalculate CER from completed predictions without running Whisper:
+
+```bash
+bash run.sh /path/to/dataset --eval-only
+```
+
+For cpCER, repeat your original command with `--stage score` appended to rescore,
+or repeat it unchanged to resume successful windows and retry pending ones.
+Keep the same paths and configuration. Changes require a new cpCER
+`--output-dir` and `--results-root`. Use `bash run_cpcer.sh --help` for options.
+
+<details>
+<summary>Optional: run CER stages individually</summary>
+
+```bash
+python scripts/prepare_dev.py /path/to/dataset \
+  --split /path/to/official/split.lst --manifest data/dev.jsonl
+
+CUDA_VISIBLE_DEVICES=0 python scripts/infer.py --model whisper-large-v3 \
+  --manifest data/dev.jsonl --data-root /path/to/dataset \
+  --model-root models --output-root outputs
+
+python scripts/evaluate.py --model whisper-large-v3 \
+  --manifest data/dev.jsonl --output-root outputs
+```
+
+`--model-root` is the parent directory containing `whisper-large-v3/`.
+For cpCER stages, append `--stage prepare`, `--stage infer`, or `--stage score`
+to the same `run_cpcer.sh` command.
+
+</details>
 
 ## Outputs and scoring
 
