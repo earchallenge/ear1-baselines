@@ -1,0 +1,8 @@
+torch>=2.2
+transformers>=4.40
+huggingface_hub>=0.23
+soundfile>=0.12
+numpy>=1.24
+scipy>=1.10
+pytest>=8.0
+tqdm>=4.66
