@@ -145,17 +145,29 @@ See `bash run_cpcer.sh --help` for all options.
 
 ```text
 outputs/<model>/dev/
-├── predictions.jsonl              # Utterance-level ASR outputs
-├── scores_by_session.csv          # CER for each session
-├── scores_by_device.csv           # CER for each device
-├── scores_by_session_device.csv   # CER for each session-device pair
-└── scores_summary.json            # Overall statistics and excluded-pair reasons
+├── predictions.jsonl              # D1/R1 utterance-level ASR outputs
+├── scores_by_session.csv          # Per-session CER, pooling D1 and R1
+├── scores_by_device.csv           # D1 and R1 CER separately, across Dev sessions
+├── scores_by_session_device.csv   # Per-session CER for D1 and R1 separately
+└── scores_summary.json            # Pooled D1/R1 statistics and excluded-pair reasons
 ```
 
 `predictions.jsonl` contains the utterance ID, Session, device, audio path, segment boundaries, raw recognition text, and normalized recognition text. CER and edit statistics are written to the CSV and JSON summary files.
 
-`Session-averaged CER (%)` is the arithmetic mean of scorable session CERs;
-`Overall CER (%)` pools character errors and reference characters across sessions.
+The standard `run.sh` workflow evaluates D1 and R1 only. Use
+`scores_by_session_device.csv` for each session's separate D1/R1 scores and
+`scores_by_device.csv` for their separate Dev totals. With seven fully scorable
+Dev sessions, these files contain 14 and 2 result rows, respectively.
+
+`scores_by_session.csv` pools D1/R1 character errors and reference characters
+within each session. In `scores_summary.json`, `overall_cer` pools both tracks
+across all Dev sessions, while `session_averaged_cer` averages the scorable
+session CERs equally. These JSON CER values are ratios; CSV CER values are percentages.
+
+The standalone `scripts/evaluate.py` also scores D1/R1 only. Other devices are
+ignored in both predictions and device exclusion statistics; their prediction
+count is recorded as `ignored_non_eval_records` in `scores_summary.json`.
+If no D1/R1 predictions are present, evaluation stops with an error.
 
 cpCER exports per-session results and an OVERALL row for each device:
 
@@ -179,8 +191,9 @@ in `reference_exclusions.json`.
 
 Both metrics normalize text with NFKC, lowercase, and removal of whitespace and
 Unicode punctuation. Whisper uses Chinese transcription, 16 kHz audio, one beam
-and maximum token length 448. **OVERALL is micro-averaged per device:** total
-character edit errors / total reference characters across Dev sessions × 100.
+and maximum token length 448. In the D1/R1 results table below and the cpCER
+per-track reports, **OVERALL is micro-averaged per track:** total character edit
+errors / total reference characters across Dev sessions × 100.
 
 CER scores reference TextGrid utterances. cpCER concatenates text chronologically
 per speaker and minimizes total character edit errors over speaker assignments.

@@ -12,6 +12,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from utils.metrics import aggregate, score
 from utils.text_normalize import normalize
 
+EVAL_DEVICES = {"D1", "R1"}
+
 
 def write_csv(path: Path, rows: list[dict]) -> None:
     path.write_text("", encoding="utf-8")
@@ -27,7 +29,14 @@ def evaluate_file(path: Path, output: Path, expected_pairs: set[tuple[str, str]]
                   pair_reasons: dict[str, str] | None = None, model_id: str = "",
                   decoding: dict | None = None, manifest_path: Path | None = None) -> dict:
     started = time.perf_counter()
+    if expected_pairs is not None:
+        expected_pairs = {(session, str(device).upper()) for session, device in expected_pairs
+                          if str(device).upper() in EVAL_DEVICES}
+    pair_reasons = {f"{pair.rsplit('/', 1)[0]}/{pair.rsplit('/', 1)[-1].upper()}": reason
+                    for pair, reason in (pair_reasons or {}).items()
+                    if pair.rsplit('/', 1)[-1].upper() in EVAL_DEVICES}
     scored = []
+    ignored_records = 0
     manifest_rows = {}
     if manifest_path is not None:
         manifest_rows = {row.get("id", row.get("utterance_id")): row for row in
@@ -37,6 +46,10 @@ def evaluate_file(path: Path, output: Path, expected_pairs: set[tuple[str, str]]
         if not line.strip():
             continue
         item = json.loads(line)
+        device = str(item.get("device_id", item.get("device", ""))).upper()
+        if device not in EVAL_DEVICES:
+            ignored_records += 1
+            continue
         uid = item.get("utterance_id", item.get("id"))
         manifest_item = manifest_rows.get(uid, {})
         reference = manifest_item.get("reference_raw", manifest_item.get("reference_text", item.get("reference", "")))
@@ -47,7 +60,7 @@ def evaluate_file(path: Path, output: Path, expected_pairs: set[tuple[str, str]]
         item.update(
             utterance_id=item.get("utterance_id", item.get("id")),
             session_id=item.get("session_id", item.get("session")),
-            device_id=item.get("device_id", item.get("device")),
+            device_id=device,
             reference=reference,
             prediction=prediction,
             reference_normalized=ref,
@@ -69,6 +82,8 @@ def evaluate_file(path: Path, output: Path, expected_pairs: set[tuple[str, str]]
         item["score"] = ({k: item[k] for k in ("substitutions", "deletions", "insertions", "ref_units", "errors", "cer")}
                          if item.get("cer") is not None else None)
         all_rows.append(item)
+    if not all_rows:
+        raise ValueError(f"No D1/R1 predictions found in {path}; prepare and recognize D1/R1 first.")
     overall = aggregate(scored)
     def grouped(key):
         groups = defaultdict(list)
@@ -100,6 +115,8 @@ def evaluate_file(path: Path, output: Path, expected_pairs: set[tuple[str, str]]
     scores_summary = {
         "model": model_id,
         "split": "dev",
+        "eval_devices": sorted(EVAL_DEVICES),
+        "ignored_non_eval_records": ignored_records,
         "session_averaged_cer": session_averaged_cer,
         "overall_cer": corpus_micro_cer,
         "utterances": len(scored),
@@ -150,7 +167,9 @@ def evaluate_file(path: Path, output: Path, expected_pairs: set[tuple[str, str]]
     write_csv(output / "scores_by_device.csv", device_report)
     write_csv(output / "scores_by_session_device.csv", session_device_report)
     (output / "scores_summary.json").write_text(json.dumps(scores_summary, ensure_ascii=False, indent=2), encoding="utf-8")
-    print("Session CER")
+    if ignored_records:
+        print(f"Ignored {ignored_records} prediction records outside D1/R1.")
+    print("Session CER (D1/R1 only)")
     print(f"{'Session':<20} {'# Utterances':>13} {'CER (%)':>12}")
     print("-" * 50)
     for row in session_report:
@@ -183,7 +202,11 @@ def main() -> int:
         for name in ("whisper-large-v2", "whisper-large-v3"):
             p = root / name / "dev" / "metrics.json"
             if p.is_file():
-                reports[name] = json.loads(p.read_text(encoding="utf-8"))
+                report = json.loads(p.read_text(encoding="utf-8"))
+                devices = {str(row.get("Device", "")).upper() for row in report.get("devices", [])}
+                if not devices or not devices <= EVAL_DEVICES:
+                    raise ValueError(f"Comparison requires a D1/R1-only report: {p}")
+                reports[name] = report
         lines = ["# Whisper baseline comparison", "", "| Model | Session-averaged CER (%) | Overall CER (%) | # Utterances |", "|---|---:|---:|---:|"]
         for name, report in reports.items():
             values = report.get("summary", {})
