@@ -83,14 +83,14 @@ corrected annotations; they have not been independently reproduced here.
 
 | Session | D1 DER (%) | R1 DER (%) |
 |---|---:|---:|
-| 20260908-1 | 25.74 | 28.60 |
-| 20260908-2 | 29.17 | 29.77 |
-| 20260923-1 | 22.67 | 46.93 |
-| 20260923-2 | 42.53 | 40.58 |
-| 20260923-5 | 14.89 | 15.43 |
-| 20260924-2 | 16.79 | 14.84 |
-| 20260924-5 | 45.89 | 48.48 |
-| OVERALL | 29.34 | 32.61 |
+| 20260908-1 | 28.54 | 33.30 |
+| 20260908-2 | 30.84 | 32.69 |
+| 20260923-1 | 23.84 | 46.92 |
+| 20260923-2 | 43.11 | 40.65 |
+| 20260923-5 | 14.88 | 15.42 |
+| 20260924-2 | 16.89 | 14.48 |
+| 20260924-5 | 51.11 | 47.99 |
+| OVERALL | 31.21 | 33.74 |
 
 Versions and scoring settings can affect reproduction. Record the DiariZen commit
 and environment with your results. Follow the upstream licenses and cite DiariZen.
