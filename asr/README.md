@@ -207,19 +207,24 @@ Exclusions are recorded in the reports.
 
 ## Contributor-reported preliminary development results
 
-CER values come from the contributor's existing `ASR_Baseline` output. cpCER
-values come from the completed DiariZen + Whisper run (8,531 ASR windows).
+CER values are reproduced with the official scripts on offset-corrected data
+(official `EAR1_timestamp_offsets.csv`; device TextGrids shifted to the device
+audio clock, 8,809 utterances). cpCER values come from the completed DiariZen +
+Whisper run with references aligned per session/device at scoring time
+(8,533 ASR windows). Sessions without clock drift match the previously
+reported numbers; R1 sessions with drift improve accordingly (e.g.
+20260923-1 R1 CER 98.39 -> 29.03). Correction details: `../tools/README_OFFSETS.md`.
 
 | Session | D1 CER (%) | R1 CER (%) | D1 cpCER (%) | R1 cpCER (%) |
 |---|---:|---:|---:|---:|
-| 20260908-1 | 85.15 | 73.91 | 81.02 | 74.64 |
-| 20260908-2 | 70.59 | 73.69 | 78.86 | 71.65 |
-| 20260923-1 | 57.69 | 98.39 | 45.81 | 33.66 |
-| 20260923-2 | 68.61 | 55.07 | 72.32 | 35.48 |
-| 20260923-5 | 41.00 | 30.28 | 29.25 | 15.96 |
-| 20260924-2 | 27.45 | 12.90 | 28.80 | 18.57 |
-| 20260924-5 | 71.29 | 67.39 | 81.41 | 74.64 |
-| OVERALL | 61.53 | 59.57 | 61.68 | 49.52 |
+| 20260908-1 | 85.14 | 73.85 | 81.02 | 74.64 |
+| 20260908-2 | 70.57 | 73.66 | 78.86 | 71.65 |
+| 20260923-1 | 57.48 | 29.03 | 45.81 | 33.66 |
+| 20260923-2 | 68.57 | 36.11 | 72.32 | 35.30 |
+| 20260923-5 | 41.06 | 19.64 | 29.25 | 15.96 |
+| 20260924-2 | 26.24 | 12.87 | 28.80 | 18.57 |
+| 20260924-5 | 71.43 | 69.26 | 81.41 | 74.64 |
+| OVERALL | 61.38 | 48.31 | 61.68 | 49.50 |
 
 Versions and scoring settings can affect reproduction. Record model, environment
 and data revisions with your results. Follow upstream licenses and cite
