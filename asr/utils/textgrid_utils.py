@@ -173,6 +173,8 @@ def prepare_records(intervals, audio_duration):
                     reason = "start_out_of_bounds"
             else:
                 reason = "end_out_of_bounds"
+        if reason is None and asterisk_count(raw):
+            reason = "asterisk_reference"
         if reason is None and not raw.strip():
             reason = "empty_text"
         if reason is None and not row["reference_norm"]:
