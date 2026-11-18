@@ -25,6 +25,7 @@ PROJECT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(PROJECT))
 from utils.cpcer import cpcer  # noqa: E402
 from utils.text_normalize import normalize  # noqa: E402
+from utils.textgrid_normalization import asterisk_count  # noqa: E402
 from utils.textgrid_utils import read_textgrid  # noqa: E402
 
 NORMALIZATION = "NFKC; lowercase; remove whitespace and Unicode punctuation"
@@ -146,6 +147,9 @@ def read_reference(root, session):
                     end=row["end"],
                     speaker=path.stem,
                     text=text,
+                    # Dataset spec: intervals containing '*' are excluded
+                    # wholesale (reference and recognition), not stripped.
+                    has_asterisk=asterisk_count(row["text"]) > 0,
                     source=str(path.resolve()),
                     interval_index=row["interval_index"],
                 )
@@ -202,16 +206,75 @@ def build_plan(root, rttm_root, tracks=("D1", "R1"), sessions=None, split_path=N
             sources[str(rttm)] = digest(rttm)
             outside_predictions = []
             predicted = rttm_segments(rttm, session, duration, outside_predictions)
+            # --- EAR1 timestamp offsets (annotation clock -> device clock) ---
+            # Inert unless EAR1_OFFSETS_JSON points at tools/offsets_final.json.
+            # References (annotation clock) are scored against RTTM
+            # (device-audio clock); shift them in memory per session/device.
+            # Intervals shifted before t=0 have no audio on the device
+            # recording: exclude them like tail-outside intervals.
+            import os as _os
+
+            _ref_shift = 0.0
+            _offsets_env = _os.environ.get("EAR1_OFFSETS_JSON", "")
+            if _offsets_env and Path(_offsets_env).is_file():
+                import json as _json
+
+                _row = _json.loads(
+                    Path(_offsets_env).read_text(encoding="utf-8")
+                ).get(session, {})
+                _ref_shift = float(
+                    _row.get("r1_offset" if device == "R1" else "d1_offset") or 0.0
+                )
+            if _ref_shift:
+                _shifted, _head_excluded = [], []
+                for _r in reference:
+                    _s = _r["start"] + _ref_shift
+                    _e = _r["end"] + _ref_shift
+                    if _s < 0:
+                        _head_excluded.append(
+                            dict(_r, reason="reference_before_device_audio")
+                        )
+                        continue
+                    _shifted.append(dict(_r, start=_s, end=_e))
+                reference_for_scoring = _shifted
+            else:
+                _head_excluded = []
+                reference_for_scoring = reference
+            # --- end EAR1 timestamp offsets patch ---
+            # --- EAR1 asterisk rule (dataset spec) ---
+            # Intervals whose annotation contains '*' are excluded wholesale
+            # from both reference and recognition results (not merely stripped
+            # of '*'). Reference side: drop the intervals from the scoring
+            # streams. Recognition side: drop predicted windows overlapping
+            # the device-clock spans of those intervals.
+            _asterisk_excluded = [
+                dict(_r, reason="asterisk_reference")
+                for _r in reference_for_scoring
+                if _r.get("has_asterisk")
+            ]
+            if _asterisk_excluded:
+                reference_for_scoring = [
+                    _r for _r in reference_for_scoring if not _r.get("has_asterisk")
+                ]
+                _asterisk_spans = [
+                    [max(0.0, _r["start"]), min(_r["end"], duration)]
+                    for _r in _asterisk_excluded
+                ]
+            else:
+                _asterisk_spans = []
+            # --- end EAR1 asterisk rule ---
             kept = [
                 r
-                for r in reference
+                for r in reference_for_scoring
                 if r["end"] <= duration + 0.01 and r["start"] < duration
             ]
             excluded = [
                 dict(r, reason="reference_outside_device_audio")
-                for r in reference
+                for r in reference_for_scoring
                 if r["end"] > duration + 0.01 or r["start"] >= duration
             ]
+            excluded.extend(_head_excluded)
+            excluded.extend(_asterisk_excluded)
             if not kept:
                 raise ValueError(f"No scoreable reference: {session}/{device}")
             streams = defaultdict(str)
@@ -234,6 +297,13 @@ def build_plan(root, rttm_root, tracks=("D1", "R1"), sessions=None, split_path=N
                 rttm_clipped_intervals=[
                     r for r in predicted if r["end"] != r["original_end"]
                 ],
+                reference_time_shift=_ref_shift,
+                reference_head_excluded=len(_head_excluded),
+                reference_asterisk_excluded_intervals=len(_asterisk_excluded),
+                reference_asterisk_excluded_characters=sum(
+                    len(_r["text"]) for _r in _asterisk_excluded
+                ),
+                asterisk_exclude_spans=_asterisk_spans,
                 reference_streams=dict(streams),
                 reference_intervals=reference,
                 reference_exclusions=excluded,
@@ -283,8 +353,8 @@ def build_plan(root, rttm_root, tracks=("D1", "R1"), sessions=None, split_path=N
         normalization=NORMALIZATION,
         max_audio_segment_sec=30,
         rttm_time_policy="Intersect predicted intervals with [0, device audio duration]; audit clipped/wholly outside segments; original RTTM unchanged; no tail tolerance threshold",
-        reference_policy="Personal A/P*.TextGrid, nonempty normalized intervals fully within device duration (+10ms tolerance); outside intervals explicitly reported; no 30s reference filter",
-        recognition_policy="Predicted RTTM boundaries/speaker IDs only, intersected with available device audio; split >30s; retain speaker overlaps; no source separation",
+        reference_policy="Personal A/P*.TextGrid, nonempty normalized intervals fully within device duration (+10ms tolerance); outside intervals explicitly reported; no 30s reference filter; intervals containing '*' are excluded wholesale from reference and recognition (dataset spec), not merely stripped of '*'",
+        recognition_policy="Predicted RTTM boundaries/speaker IDs only, intersected with available device audio; split >30s; retain speaker overlaps; no source separation; predicted windows overlapping an excluded '*'-interval span are dropped from the hypothesis streams",
         audio_identity_policy="Path, byte size, mtime, sample rate, duration; full WAV content not hashed",
         pairs=pairs,
         segments=segments,
@@ -523,6 +593,11 @@ def score_predictions(plan, output, identity, results_root=None):
         raise ValueError(
             "Incomplete/failed ASR. Resume inference before scoring; no failed rows are dropped."
         )
+    _spans_by_pair = {
+        (p["session"], p["device"]): [tuple(s) for s in p.get("asterisk_exclude_spans", [])]
+        for p in plan["pairs"]
+    }
+    _hyp_drop = defaultdict(lambda: [0, 0])  # (session, device) -> [windows, chars]
     streams = defaultdict(lambda: defaultdict(str))
     for item in sorted(
         plan["segments"],
@@ -535,8 +610,15 @@ def score_predictions(plan, output, identity, results_root=None):
             r["id"],
         ),
     ):
+        _prediction = rows[item["id"]]["prediction"]
+        _spans = _spans_by_pair.get((item["session"], item["device"]), ())
+        if _spans and any(item["start"] < s[1] and item["end"] > s[0] for s in _spans):
+            _key = (item["session"], item["device"])
+            _hyp_drop[_key][0] += 1
+            _hyp_drop[_key][1] += len(normalize(_prediction))
+            continue
         streams[item["session"], item["device"]][item["speaker"]] += normalize(
-            rows[item["id"]]["prediction"]
+            _prediction
         )
     results = []
     for pair in plan["pairs"]:
@@ -551,6 +633,12 @@ def score_predictions(plan, output, identity, results_root=None):
                 excluded_reference_characters=sum(
                     len(r["text"]) for r in pair["reference_exclusions"]
                 ),
+                asterisk_excluded_windows=_hyp_drop.get(
+                    (pair["session"], pair["device"]), [0, 0]
+                )[0],
+                asterisk_excluded_hypothesis_characters=_hyp_drop.get(
+                    (pair["session"], pair["device"]), [0, 0]
+                )[1],
                 reference_streams=pair["reference_streams"],
                 hypothesis_streams=hypothesis,
             )
@@ -590,6 +678,11 @@ def score_predictions(plan, output, identity, results_root=None):
         reference_excluded_intervals=sum(
             r["excluded_reference_intervals"] for r in results
         ),
+        asterisk_excluded_reference_intervals=sum(
+            p.get("reference_asterisk_excluded_intervals", 0) for p in plan["pairs"]
+        ),
+        asterisk_excluded_windows=sum(v[0] for v in _hyp_drop.values()),
+        asterisk_excluded_hypothesis_characters=sum(v[1] for v in _hyp_drop.values()),
         hit_token_limit_segments=sum(
             bool(r.get("hit_token_limit")) for r in rows.values()
         ),
@@ -663,7 +756,11 @@ def score_predictions(plan, output, identity, results_root=None):
         "",
         summary["note"],
         "",
-        f"Excluded reference intervals: {summary['reference_excluded_intervals']}; token-limit segments: {summary['hit_token_limit_segments']}.",
+        f"Excluded reference intervals: {summary['reference_excluded_intervals']} "
+        f"(of which asterisk intervals: {summary['asterisk_excluded_reference_intervals']}); "
+        f"asterisk-excluded hypothesis windows: {summary['asterisk_excluded_windows']} "
+        f"({summary['asterisk_excluded_hypothesis_characters']} chars); "
+        f"token-limit segments: {summary['hit_token_limit_segments']}.",
     ]
     (output / "cpcer_results.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
     if results_root is not None:
